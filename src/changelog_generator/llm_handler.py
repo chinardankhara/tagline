@@ -1,25 +1,101 @@
 from typing import Dict, List, Optional
 import os
-from google import genai
-# from google.generativeai import types # <- Remove this or comment out
+import google.generativeai as genai # Use the main import
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class LLMHandler:
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize the LLM handler with Google's Gemini API.
-        
-        Args:
-            api_key: Optional Google API key. If not provided, will look for GEMINI_API_KEY env var.
-        """
+        """Initialize the LLM handler with Google's Gemini API."""
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "No API key provided. Set GEMINI_API_KEY environment variable or pass key to constructor."
-            )
-        self.client = genai.Client(api_key=self.api_key)
-        self.model = "gemini-2.0-flash"  # Using the fast model for better latency
+            raise ValueError("No API key provided. Set GEMINI_API_KEY env var or pass key.")
+
+        # Configure the SDK
+        genai.configure(api_key=self.api_key)
+
+        # --- Model for Changelog Generation ---
+        changelog_model_name = "gemini-2.0-flash"
+        changelog_system_prompt = """You are a skilled technical writer specializing in changelog generation.
+Your task is to create a clear, concise, and well-organized changelog from Git commit history.
+Focus on user-facing changes and their impact. Group related changes into logical categories (e.g., Features, Bug Fixes, Performance, Documentation, Refactoring, Other).
+Include relevant PR/Issue numbers if mentioned in commits. Highlight any Breaking Changes prominently."""
+
+        changelog_generation_config = {
+            "temperature": 0.2,
+            "max_output_tokens": 8192, # Allow more tokens for full changelog
+        }
+        changelog_safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        ]
+        self.changelog_model = genai.GenerativeModel(
+            model_name=changelog_model_name,
+            generation_config=changelog_generation_config,
+            system_instruction=changelog_system_prompt,
+            safety_settings=changelog_safety_settings
+        )
+        print(f"Initialized changelog model: {changelog_model_name}")
+
+
+        # --- Model for Commit Formatting ---
+        formatter_model_name = "gemini-2.0-flash" # Flash is suitable here
+        formatter_system_prompt = """You are an expert commit message formatter.
+Make the provided message clear, concise, and suitable for a changelog entry, while preserving its core meaning.
+Remove conversational filler or unnecessary details, but *keep* any mentioned Pull Request (e.g., #123) or Issue numbers."""
+
+        formatter_generation_config = {
+            "temperature": 0.1,
+            "max_output_tokens": 150, # Shorter output needed
+        }
+        # Safety settings can often be reused
+        formatter_safety_settings = changelog_safety_settings
+
+        self.formatter_model = genai.GenerativeModel(
+            model_name=formatter_model_name,
+            generation_config=formatter_generation_config,
+            system_instruction=formatter_system_prompt,
+            safety_settings=formatter_safety_settings
+        )
+        print(f"Initialized formatter model: {formatter_model_name}")
+
+
+    def _safe_generate_content(self, model: genai.GenerativeModel, prompt: str) -> str:
+        """Helper to call generate_content and handle response/errors safely."""
+        try:
+            response = model.generate_content(prompt)
+
+            # Check for blocks or empty responses
+            if not response.candidates:
+                if response.prompt_feedback.block_reason:
+                     block_reason_str = str(response.prompt_feedback.block_reason)
+                     raise ValueError(f"LLM Response Blocked: {block_reason_str}")
+                else:
+                     # Check if parts exist but are empty (might indicate other issues)
+                     try:
+                         # Attempt to access text to see if it fails in a specific way
+                         _ = response.text
+                         raise ValueError("Empty response from LLM (No candidates returned, but no block reason)")
+                     except Exception as inner_ex:
+                         # Catch potential errors accessing .text if structure is unexpected
+                          raise ValueError(f"Empty or invalid response structure from LLM. Inner error: {inner_ex}")
+
+            # Extract text safely using response.text property
+            generated_text = response.text.strip()
+            if not generated_text:
+                 raise ValueError("Empty text content in LLM response")
+
+            return generated_text
+
+        except Exception as e:
+            # Catch API errors, config errors, ValueErrors from checks above, etc.
+            print(f"LLM API Error ({model.model_name}): {type(e).__name__} - {e}")
+            # Re-raise the exception to be handled by the calling method's try-except block
+            raise e
+
 
     def generate_changelog(
         self,
@@ -29,32 +105,11 @@ class LLMHandler:
         to_ref: str,
         repo: str,
     ) -> str:
-        """Generate a changelog from the given commits and file changes.
-        
-        Args:
-            commits: List of commit objects from GitHub API
-            files_changed: List of file changes from GitHub API
-            from_ref: Starting reference (tag/commit)
-            to_ref: Ending reference (tag/commit)
-            repo: Repository name (owner/repo)
-            
-        Returns:
-            A formatted changelog string
-        """
-        # Construct the prompt with clear instructions
-        system_prompt = """You are a skilled technical writer specializing in changelog generation.
-        Your task is to create a clear, well-organized changelog from Git commit history.
-        Follow these guidelines:
-        1. Group related changes into categories (e.g., Features, Bug Fixes, Documentation, etc.)
-        2. Use clear, concise language
-        3. Maintain a professional tone
-        4. Highlight breaking changes or important updates
-        5. Include relevant PR/Issue numbers if mentioned in commits
-        6. Summarize technical changes in user-friendly terms
-        """
-
-        # Format the commit data for the model
+        """Generate a changelog using the configured model."""
+        # Format the commit data for the prompt
         commit_details = "\n".join([
+            # Maybe format individual messages first for clarity? Optional.
+            # f"- {commit.get('sha', '')[:7]}: {self.format_commit_message(commit.get('commit', {}).get('message', ''))}"
             f"- {commit.get('sha', '')[:7]}: {commit.get('commit', {}).get('message', '').strip()}"
             for commit in commits
         ])
@@ -65,69 +120,26 @@ class LLMHandler:
             for file in files_changed
         ])
 
-        user_prompt = f"""Generate a changelog for {repo} from {from_ref} to {to_ref}.
+        # Construct the user prompt (system prompt is now set on the model)
+        user_prompt = f"""Generate a changelog for repository '{repo}' comparing versions '{from_ref}' and '{to_ref}'.
 
-Commit History:
+Use the following commit history and file changes:
+
+### Commit History:
 {commit_details}
 
-Files Changed:
+### Files Changed Summary:
 {file_changes}
 
-Format the changelog with the following sections:
-- Summary (brief overview of major changes)
-- Breaking Changes (if any)
-- Features
-- Bug Fixes
-- Performance Improvements
-- Documentation
-- Other Changes
-
-Focus on user-facing changes and their impact."""
-
-        # Define generation config as a dictionary
-        generation_config = {
-            "temperature": 0.2,
-            "max_output_tokens": 1000,
-        }
-        # Define safety settings if needed (optional, but good practice)
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-        ]
+### Instructions:
+Create a changelog summarizing the key changes. Group related items logically (Features, Bug Fixes, etc.). Ensure BREAKING CHANGES are clearly marked if any are apparent."""
 
         try:
-            # Call generate_content using the generation_config dictionary
-            response = self.client.models.generate_content(
-                model=self.model,
-                # Pass config dictionary to generation_config
-                generation_config=generation_config,
-                # Pass system instruction separately if supported or combine into contents
-                system_instruction=system_prompt, # Keep this if it works, otherwise integrate into user_prompt
-                contents=user_prompt,
-                safety_settings=safety_settings # Add safety settings
-            )
-
-            # Handle potential lack of text even without error
-            if not response.candidates or not response.candidates[0].content.parts:
-                 # Check if the response was blocked due to safety settings
-                 if response.prompt_feedback.block_reason:
-                     raise ValueError(f"LLM Response Blocked: {response.prompt_feedback.block_reason}")
-                 else:
-                     raise ValueError("Empty response from LLM (No candidates or parts)")
-
-            # Extract text safely
-            generated_text = "".join(part.text for part in response.candidates[0].content.parts if hasattr(part, 'text'))
-            if not generated_text:
-                 raise ValueError("Empty text content in LLM response parts")
-
-
-            return generated_text # Use the safely extracted text
+            # Use the helper method with the dedicated changelog model
+            return self._safe_generate_content(self.changelog_model, user_prompt)
 
         except Exception as e:
-            # Log the error and return a formatted error message
-            print(f"LLM API Error: {e}") # Print the specific error
+            # Format a fallback message including the raw data
             error_msg = f"""Failed to generate changelog due to an error: {str(e)}
 
 Raw commit data has been included below:
@@ -143,44 +155,16 @@ Raw commit data has been included below:
             return error_msg
 
     def format_commit_message(self, message: str) -> str:
-        """Clean and format a single commit message.
-        
-        Args:
-            message: Raw commit message
-            
-        Returns:
-            Formatted commit message
-        """
-        generation_config = {
-            "temperature": 0.1,
-            "max_output_tokens": 100,
-        }
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            # ... other categories ...
-        ]
-        system_instruction_formatter = """You are a commit message formatter.
-                    Make the message clear and concise while preserving its meaning.
-                    Remove unnecessary details but keep PR numbers and issue references."""
+        """Clean and format a single commit message using the configured formatter model."""
+        if not message: # Handle empty messages
+            return ""
+
+        # Construct the prompt for the formatter model
+        user_prompt = f"Format this commit message clearly and concisely for a changelog:\n\n```\n{message}\n```"
 
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                generation_config=generation_config,
-                system_instruction=system_instruction_formatter,
-                contents=f"Format this commit message clearly and concisely:\n{message}",
-                safety_settings=safety_settings
-            )
-            # Safe text extraction as above
-            if not response.candidates or not response.candidates[0].content.parts:
-                 if response.prompt_feedback.block_reason:
-                     print(f"LLM format_commit_message Blocked: {response.prompt_feedback.block_reason}")
-                 return message.strip() # Fallback to original on empty response/block
-            
-            formatted_text = "".join(part.text for part in response.candidates[0].content.parts if hasattr(part, 'text')).strip()
-            return formatted_text if formatted_text else message.strip() # Fallback if text is empty
-
+             # Use the helper method with the dedicated formatter model
+            return self._safe_generate_content(self.formatter_model, user_prompt)
         except Exception as e:
-            print(f"LLM format_commit_message Error: {e}")
-            # On error, return the original message
-            return message.strip()
+            # On error, return the original message (already printed error in helper)
+            return message.strip() # Return original message on failure
