@@ -176,10 +176,3 @@ def test_request_handles_404_error(mocker):
 
     # Optionally check the status code on the raised exception
     assert excinfo.value.response.status_code == 404
-
-# --- TODO: Add more tests ---
-# - get_tags with API errors (401, 403, etc.) -> Check print messages too?
-# - compare_commits with API errors
-# - get_commit method (success and errors)
-# - get_default_branch with API errors
-# - Handling network errors (requests.exceptions.RequestException) -> Use side_effect=NetworkError(...)
