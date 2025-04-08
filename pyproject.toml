@@ -1,0 +1,11 @@
+[project]
+name = "llm-changelog"
+version = "0.1.0"
+description = "AI-powered changelog generator for GitHub repositories."
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+license = { file = "LICENSE" }
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
