@@ -46,19 +46,24 @@ jobs:
 
       - name: Generate Changelog File
         id: generate
+        if: steps.previous_tag.outputs.is_first_tag == 'false' # Only run if NOT the first tag
         run: |
-          CURRENT_TAG=${{ github.ref_name }} # e.g., v1.8.0
-          PREVIOUS_TAG=${{ steps.previous_tag.outputs.previous_tag }}
-          REPO_NAME=${{ github.repository }} # e.g., your-username/llm-changelog (use target repo if different)
-          TARGET_REPO="mendableai/firecrawl" # Or get dynamically if needed
-          OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md"
+          # --- MODIFICATION FOR DEMO ---
+          # Instead of using tags from this repo's history,
+          # use known existing tags from the target repo for demonstration.
+          CURRENT_TAG="v1.7.0"  # Use a known recent tag from mendableai/firecrawl
+          PREVIOUS_TAG="v1.6.0" # Use a known previous tag from mendableai/firecrawl
+          # --- END MODIFICATION ---
+
+          TARGET_REPO="mendableai/firecrawl"
+          OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md" # Filename reflects the demo tags
 
           echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG for $TARGET_REPO"
           python3 -m src.changelog_generator.cli $TARGET_REPO --from-tag $PREVIOUS_TAG --to-tag $CURRENT_TAG -o $OUTPUT_FILENAME --token $GITHUB_TOKEN
 
           echo "output_filename=$OUTPUT_FILENAME" >> "$GITHUB_OUTPUT"
         env:
-          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }} # Change to match your actual secret name
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }} # Use your secret
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Checkout Website Repo
