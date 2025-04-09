@@ -64,7 +64,7 @@ jobs:
       - name: Checkout Website Repo
         uses: actions/checkout@v4
         with:
-          repository: your-username/llm-changelog-website # IMPORTANT: Replace with your website repo
+          repository: chinardankhara/llm-changelog-website # IMPORTANT: Replace with your website repo
           path: website # Checkout to a subdirectory
           token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # A PAT stored as a secret, needed to push
 
