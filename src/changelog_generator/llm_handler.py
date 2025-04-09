@@ -1,9 +1,21 @@
 from typing import Dict, List, Optional
 import os
-import google.generativeai as genai # Use the main import
+import google.generativeai as genai
 from dotenv import load_dotenv
+import pathlib
+import datetime
 
 load_dotenv()
+
+def load_template(filename: str) -> str:
+    """Load a template from the templates directory."""
+    template_dir = pathlib.Path(__file__).parent / "templates"
+    template_path = template_dir / filename
+    
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template file not found: {template_path}")
+    
+    return template_path.read_text()
 
 class LLMHandler:
     def __init__(self, api_key: Optional[str] = None):
@@ -15,16 +27,17 @@ class LLMHandler:
         # Configure the SDK
         genai.configure(api_key=self.api_key)
 
-        # --- Model for Changelog Generation ---
-        changelog_model_name = "gemini-2.0-flash"
-        changelog_system_prompt = """You are a skilled technical writer specializing in changelog generation.
-Your task is to create a clear, concise, and well-organized changelog from Git commit history.
-Focus on user-facing changes and their impact. Group related changes into logical categories (e.g., Features, Bug Fixes, Performance, Documentation, Refactoring, Other).
-Include relevant PR/Issue numbers if mentioned in commits. Highlight any Breaking Changes prominently."""
+        # Load system prompts from template files
+        changelog_system_prompt = load_template("changelog_system_prompt.md")
+        formatter_system_prompt = """You are an expert commit message formatter.
+Make the provided message clear, concise, and suitable for a changelog entry, while preserving its core meaning.
+Remove conversational filler or unnecessary details, but *keep* any mentioned Pull Request (e.g., #123) or Issue numbers."""
 
+        # --- Model for Changelog Generation ---
+        changelog_model_name = os.getenv("MODEL")  # Or "gemini-1.5-pro-latest" if needed
         changelog_generation_config = {
             "temperature": 0.2,
-            "max_output_tokens": 8192, # Allow more tokens for full changelog
+            "max_output_tokens": 8192,  # Allow more tokens for full changelog
         }
         changelog_safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -40,18 +53,12 @@ Include relevant PR/Issue numbers if mentioned in commits. Highlight any Breakin
         )
         print(f"Initialized changelog model: {changelog_model_name}")
 
-
         # --- Model for Commit Formatting ---
-        formatter_model_name = "gemini-2.0-flash" # Flash is suitable here
-        formatter_system_prompt = """You are an expert commit message formatter.
-Make the provided message clear, concise, and suitable for a changelog entry, while preserving its core meaning.
-Remove conversational filler or unnecessary details, but *keep* any mentioned Pull Request (e.g., #123) or Issue numbers."""
-
+        formatter_model_name = os.getenv("MODEL")  # Flash is suitable here
         formatter_generation_config = {
             "temperature": 0.1,
-            "max_output_tokens": 150, # Shorter output needed
+            "max_output_tokens": 150,  # Shorter output needed
         }
-        # Safety settings can often be reused
         formatter_safety_settings = changelog_safety_settings
 
         self.formatter_model = genai.GenerativeModel(
@@ -62,7 +69,6 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
         )
         print(f"Initialized formatter model: {formatter_model_name}")
 
-
     def _safe_generate_content(self, model: genai.GenerativeModel, prompt: str) -> str:
         """Helper to call generate_content and handle response/errors safely."""
         try:
@@ -70,23 +76,23 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
 
             # Check for blocks or empty responses
             if not response.candidates:
-                if response.prompt_feedback.block_reason:
-                     block_reason_str = str(response.prompt_feedback.block_reason)
-                     raise ValueError(f"LLM Response Blocked: {block_reason_str}")
+                if response.prompt_feedback and response.prompt_feedback.block_reason:
+                    block_reason_str = str(response.prompt_feedback.block_reason)
+                    raise ValueError(f"LLM Response Blocked: {block_reason_str}")
                 else:
-                     # Check if parts exist but are empty (might indicate other issues)
-                     try:
-                         # Attempt to access text to see if it fails in a specific way
-                         _ = response.text
-                         raise ValueError("Empty response from LLM (No candidates returned, but no block reason)")
-                     except Exception as inner_ex:
-                         # Catch potential errors accessing .text if structure is unexpected
-                          raise ValueError(f"Empty or invalid response structure from LLM. Inner error: {inner_ex}")
+                    # Check if parts exist but are empty (might indicate other issues)
+                    try:
+                        # Attempt to access text to see if it fails in a specific way
+                        _ = response.text
+                        raise ValueError("Empty response from LLM (No candidates returned, but no block reason)")
+                    except Exception as inner_ex:
+                        # Catch potential errors accessing .text if structure is unexpected
+                        raise ValueError(f"Empty or invalid response structure from LLM. Inner error: {inner_ex}")
 
             # Extract text safely using response.text property
             generated_text = response.text.strip()
             if not generated_text:
-                 raise ValueError("Empty text content in LLM response")
+                raise ValueError("Empty text content in LLM response")
 
             return generated_text
 
@@ -95,7 +101,6 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
             print(f"LLM API Error ({model.model_name}): {type(e).__name__} - {e}")
             # Re-raise the exception to be handled by the calling method's try-except block
             raise e
-
 
     def generate_changelog(
         self,
@@ -106,33 +111,39 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
         repo: str,
     ) -> str:
         """Generate a changelog using the configured model."""
-        # Format the commit data for the prompt
-        commit_details = "\n".join([
-            # Maybe format individual messages first for clarity? Optional.
-            # f"- {commit.get('sha', '')[:7]}: {self.format_commit_message(commit.get('commit', {}).get('message', ''))}"
-            f"- {commit.get('sha', '')[:7]}: {commit.get('commit', {}).get('message', '').strip()}"
-            for commit in commits
-        ])
+        # Format commits (optionally clean them first)
+        cleaned_commits = []
+        for commit in commits:
+            sha_short = commit.get('sha', '')[:7]
+            message = commit.get('commit', {}).get('message', '').strip()
+            author = commit.get('commit', {}).get('author', {}).get('name', '')
+            date = commit.get('commit', {}).get('author', {}).get('date', '')
+            
+            # Format the commit details with more information
+            cleaned_commits.append(f"- {sha_short}: {message} (by {author} on {date})")
+            
+        commit_details = "\n".join(cleaned_commits)
 
+        # Format file changes
         file_changes = "\n".join([
             f"- {file.get('filename', '')}: {file.get('status', '')} "
             f"({file.get('additions', 0)} additions, {file.get('deletions', 0)} deletions)"
             for file in files_changed
         ])
 
-        # Construct the user prompt (system prompt is now set on the model)
-        user_prompt = f"""Generate a changelog for repository '{repo}' comparing versions '{from_ref}' and '{to_ref}'.
+        # Get the current date for the changelog
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
-Use the following commit history and file changes:
-
-### Commit History:
-{commit_details}
-
-### Files Changed Summary:
-{file_changes}
-
-### Instructions:
-Create a changelog summarizing the key changes. Group related items logically (Features, Bug Fixes, etc.). Ensure BREAKING CHANGES are clearly marked if any are apparent."""
+        # Load and format the user prompt template
+        user_prompt_template = load_template("changelog_user_prompt.md")
+        user_prompt = user_prompt_template.format(
+            repo=repo,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            commit_details=commit_details,
+            file_changes=file_changes,
+            current_date=current_date
+        )
 
         try:
             # Use the helper method with the dedicated changelog model
@@ -156,15 +167,15 @@ Raw commit data has been included below:
 
     def format_commit_message(self, message: str) -> str:
         """Clean and format a single commit message using the configured formatter model."""
-        if not message: # Handle empty messages
+        if not message:  # Handle empty messages
             return ""
 
         # Construct the prompt for the formatter model
         user_prompt = f"Format this commit message clearly and concisely for a changelog:\n\n```\n{message}\n```"
 
         try:
-             # Use the helper method with the dedicated formatter model
+            # Use the helper method with the dedicated formatter model
             return self._safe_generate_content(self.formatter_model, user_prompt)
         except Exception as e:
             # On error, return the original message (already printed error in helper)
-            return message.strip() # Return original message on failure
+            return message.strip()  # Return original message on failure
