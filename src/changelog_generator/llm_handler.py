@@ -7,6 +7,8 @@ import datetime
 
 load_dotenv()
 
+MODEL = "gemini-2.5-pro-preview-03-25"
+
 def load_template(filename: str) -> str:
     """Load a template from the templates directory."""
     template_dir = pathlib.Path(__file__).parent / "templates"
@@ -34,7 +36,7 @@ Make the provided message clear, concise, and suitable for a changelog entry, wh
 Remove conversational filler or unnecessary details, but *keep* any mentioned Pull Request (e.g., #123) or Issue numbers."""
 
         # --- Model for Changelog Generation ---
-        changelog_model_name = os.getenv("MODEL")  # Or "gemini-1.5-pro-latest" if needed
+        changelog_model_name = MODEL# Or "gemini-1.5-pro-latest" if needed
         changelog_generation_config = {
             "temperature": 0.2,
             "max_output_tokens": 8192,  # Allow more tokens for full changelog
@@ -54,7 +56,7 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
         print(f"Initialized changelog model: {changelog_model_name}")
 
         # --- Model for Commit Formatting ---
-        formatter_model_name = os.getenv("MODEL")  # Flash is suitable here
+        formatter_model_name = MODEL # Flash is suitable here
         formatter_generation_config = {
             "temperature": 0.1,
             "max_output_tokens": 150,  # Shorter output needed
