@@ -72,12 +72,15 @@ jobs:
 
       - name: Move Changelog to Website Repo
         run: |
+          CHANGELOG_PATH="changelogs/${{ steps.generate.outputs.output_filename }}"
           # Ensure the file exists before moving (might fail if generation failed)
-          if [ -f "${{ steps.generate.outputs.output_filename }}" ]; then
-            mv ${{ steps.generate.outputs.output_filename }} website/changelogs/
-            echo "Moved ${{ steps.generate.outputs.output_filename }} to website/changelogs/"
+          if [ -f "$CHANGELOG_PATH" ]; then
+            # Ensure the target directory exists in the checked-out website repo
+            mkdir -p website/changelogs/
+            mv "$CHANGELOG_PATH" website/changelogs/
+            echo "Moved $CHANGELOG_PATH to website/changelogs/"
           else
-            echo "Changelog file ${{ steps.generate.outputs.output_filename }} not found. Skipping move."
+            echo "Changelog file $CHANGELOG_PATH not found. Skipping move."
             exit 1 # Optionally fail the workflow if generation failed
           fi
 
