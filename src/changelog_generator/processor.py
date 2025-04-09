@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, List, Dict, Any
 import requests # For exception types
+import traceback # Add this import
 
 from .github_client import GitHubClient
 from .llm_handler import LLMHandler
@@ -165,6 +166,10 @@ def process_repository(
          raise # Re-raise to be caught by the CLI's try-except block
 
     except Exception as e:
-         print(f"An unexpected error occurred in processor: {e}")
+         print(f"An unexpected error occurred in processor: {type(e).__name__} - {e}")
+         # Print the full traceback to pinpoint the error source
+         print("--- Traceback ---")
+         traceback.print_exc()
+         print("--- End Traceback ---")
          # Handle other potential errors during processing
          raise # Re-raise to be caught by the CLI's try-except block
