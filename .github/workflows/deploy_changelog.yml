@@ -72,7 +72,6 @@ jobs:
 
       - name: Move Changelog to Website Repo
         run: |
-          mkdir -p website/changelogs
           # Ensure the file exists before moving (might fail if generation failed)
           if [ -f "${{ steps.generate.outputs.output_filename }}" ]; then
             mv ${{ steps.generate.outputs.output_filename }} website/changelogs/
