@@ -33,10 +33,16 @@ jobs:
       - name: Get Previous Tag
         id: previous_tag
         run: |
-          # Simple way to get the tag before the current one
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1))
+          # List all tags sorted by version (newest first)
+          ALL_TAGS=$(git tag --sort=-v:refname)
+          # Get second tag or use the initial commit if there's no second tag
+          if [ $(echo "$ALL_TAGS" | wc -l) -ge 2 ]; then
+            PREVIOUS_TAG=$(echo "$ALL_TAGS" | sed -n '2p')
+          else
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "Not enough tags exist, using first commit as previous reference"
+          fi
           echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
-        # Note: This assumes linear tag history. More robust methods exist.
 
       - name: Generate Changelog File
         id: generate
