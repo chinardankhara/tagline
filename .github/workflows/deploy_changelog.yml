@@ -1,0 +1,86 @@
+# .github/workflows/deploy_changelog.yml
+name: Generate and Deploy Changelog
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger only on version tags (e.g., v1.0.0)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+        contents: read # Read repo contents
+
+    steps:
+      - name: Checkout Project Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Needed to get all tags
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' # Match your project's Python version
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # If you package your tool (recommended!), install it here:
+          # pip install .
+
+      - name: Get Previous Tag
+        id: previous_tag
+        run: |
+          # Simple way to get the tag before the current one
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1))
+          echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+        # Note: This assumes linear tag history. More robust methods exist.
+
+      - name: Generate Changelog File
+        id: generate
+        run: |
+          CURRENT_TAG=${{ github.ref_name }} # e.g., v1.8.0
+          PREVIOUS_TAG=${{ steps.previous_tag.outputs.previous_tag }}
+          REPO_NAME=${{ github.repository }} # e.g., your-username/llm-changelog (use target repo if different)
+          TARGET_REPO="mendableai/firecrawl" # Or get dynamically if needed
+          OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md"
+
+          echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG for $TARGET_REPO"
+          python3 -m src.changelog_generator.cli $TARGET_REPO --from-tag $PREVIOUS_TAG --to-tag $CURRENT_TAG -o $OUTPUT_FILENAME
+
+          echo "output_filename=$OUTPUT_FILENAME" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_GITHUB_TOKEN }} # Use the default token for reading the source repo
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # Your Gemini Key stored as a repo secret
+
+      - name: Checkout Website Repo
+        uses: actions/checkout@v4
+        with:
+          repository: your-username/llm-changelog-website # IMPORTANT: Replace with your website repo
+          path: website # Checkout to a subdirectory
+          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # A PAT stored as a secret, needed to push
+
+      - name: Move Changelog to Website Repo
+        run: |
+          mkdir -p website/changelogs # Ensure directory exists
+          mv ${{ steps.generate.outputs.output_filename }} website/changelogs/
+          echo "Moved ${{ steps.generate.outputs.output_filename }} to website/changelogs/"
+
+      - name: Commit and Push to Website Repo
+        run: |
+          cd website
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add changelogs/*
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add changelog ${{ github.ref_name }}"
+            git push
+            echo "Pushed new changelog to website repository."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # Use the PAT again for push
