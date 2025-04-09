@@ -2,3 +2,5 @@ typer
 google-generativeai
 pytest
 python-dotenv
+requests
+pytest-mock

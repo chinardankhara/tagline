@@ -1,83 +1,86 @@
 # .github/workflows/deploy_changelog.yml
-name: Generate and Deploy Changelog
+name: Deploy Changelog
 
 on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: 'Target repository (owner/repo)'
+        required: true
+      from_tag:
+        description: 'Starting tag for changelog'
+        required: true
+      to_tag:
+        description: 'Ending tag for changelog'
+        required: true
+  # Keep any existing triggers if present
   push:
     tags:
-      - 'v*' # Trigger only on version tags (e.g., v1.0.0)
+      - 'v*'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     permissions:
-        contents: read # Read repo contents
+      contents: read # Read repo contents where the action runs
 
     steps:
       - name: Checkout Project Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Needed to get all tags
+        # No fetch-depth needed as we aren't reading tags from this repo's history
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # Match your project's Python version
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # If you package your tool (recommended!), install it here:
-          # pip install .
+          # pip install . # If packaged
 
-      - name: Get Previous Tag
-        id: previous_tag
-        run: |
-          # List all tags sorted by version (newest first)
-          ALL_TAGS=$(git tag --sort=-v:refname)
-          # Get second tag or use the initial commit if there's no second tag
-          if [ $(echo "$ALL_TAGS" | wc -l) -ge 2 ]; then
-            PREVIOUS_TAG=$(echo "$ALL_TAGS" | sed -n '2p')
-          else
-            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
-            echo "Not enough tags exist, using first commit as previous reference"
-          fi
-          echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+      # No 'Get Previous Tag' step needed - tags are provided as input
 
       - name: Generate Changelog File
         id: generate
-        if: steps.previous_tag.outputs.is_first_tag == 'false' # Only run if NOT the first tag
         run: |
-          # --- MODIFICATION FOR DEMO ---
-          # Instead of using tags from this repo's history,
-          # use known existing tags from the target repo for demonstration.
-          CURRENT_TAG="v1.7.0"  # Use a known recent tag from mendableai/firecrawl
-          PREVIOUS_TAG="v1.6.0" # Use a known previous tag from mendableai/firecrawl
-          # --- END MODIFICATION ---
+          # Use inputs from the workflow_dispatch event
+          TARGET_REPO="${{ github.event.inputs.target_repo }}"
+          PREVIOUS_TAG="${{ github.event.inputs.from_tag }}"
+          CURRENT_TAG="${{ github.event.inputs.to_tag }}"
 
-          TARGET_REPO="mendableai/firecrawl"
-          OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md" # Filename reflects the demo tags
+          OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md"
 
           echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG for $TARGET_REPO"
+          # Make sure the CLI tool is installed or runnable
           python3 -m src.changelog_generator.cli $TARGET_REPO --from-tag $PREVIOUS_TAG --to-tag $CURRENT_TAG -o $OUTPUT_FILENAME --token $GITHUB_TOKEN
 
           echo "output_filename=$OUTPUT_FILENAME" >> "$GITHUB_OUTPUT"
         env:
-          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }} # Use your secret
+          # Use the token provided by the triggering user/CLI via secrets
+          # Note: This GITHUB_TOKEN might need repo read access to the TARGET_REPO
+          GITHUB_TOKEN: ${{ secrets.GIT_TOKEN }} # Secret needed for CLI to read target repo
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Checkout Website Repo
         uses: actions/checkout@v4
         with:
-          repository: chinardankhara/llm-changelog-website # IMPORTANT: Replace with your website repo
-          path: website # Checkout to a subdirectory
-          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # A PAT stored as a secret, needed to push
+          repository: chinardankhara/llm-changelog-website # Your website repo
+          path: website
+          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # PAT with write access to website repo
 
       - name: Move Changelog to Website Repo
         run: |
-          mkdir -p website/changelogs # Ensure directory exists
-          mv ${{ steps.generate.outputs.output_filename }} website/changelogs/
-          echo "Moved ${{ steps.generate.outputs.output_filename }} to website/changelogs/"
+          mkdir -p website/changelogs
+          # Ensure the file exists before moving (might fail if generation failed)
+          if [ -f "${{ steps.generate.outputs.output_filename }}" ]; then
+            mv ${{ steps.generate.outputs.output_filename }} website/changelogs/
+            echo "Moved ${{ steps.generate.outputs.output_filename }} to website/changelogs/"
+          else
+            echo "Changelog file ${{ steps.generate.outputs.output_filename }} not found. Skipping move."
+            exit 1 # Optionally fail the workflow if generation failed
+          fi
 
       - name: Commit and Push to Website Repo
         run: |
@@ -85,13 +88,14 @@ jobs:
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
           git add changelogs/*
-          # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Add changelog ${{ github.ref_name }}"
+            # Use the 'to_tag' as a reference in the commit message
+            git commit -m "Add changelog up to ${{ github.event.inputs.to_tag }}"
             git push
             echo "Pushed new changelog to website repository."
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.WEBSITE_DEPLOY_TOKEN }} # Use the PAT again for push
+          # Use the PAT with write access to the website repo
+          GITHUB_TOKEN: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
