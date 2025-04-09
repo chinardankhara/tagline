@@ -52,9 +52,9 @@ jobs:
 
           OUTPUT_FILENAME="${TARGET_REPO//\//-}_${PREVIOUS_TAG}_to_${CURRENT_TAG}.md"
 
-          echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG for $TARGET_REPO"
+          echo "Generating changelog locally from $PREVIOUS_TAG to $CURRENT_TAG for $TARGET_REPO"
           # Make sure the CLI tool is installed or runnable
-          python3 -m src.changelog_generator.cli $TARGET_REPO --from-tag $PREVIOUS_TAG --to-tag $CURRENT_TAG -o $OUTPUT_FILENAME --token $GITHUB_TOKEN
+          python3 -m src.changelog_generator.cli $TARGET_REPO --from-tag $PREVIOUS_TAG --to-tag $CURRENT_TAG -o $OUTPUT_FILENAME --token $GITHUB_TOKEN --local
 
           echo "output_filename=$OUTPUT_FILENAME" >> "$GITHUB_OUTPUT"
         env:
