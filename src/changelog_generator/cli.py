@@ -161,8 +161,7 @@ def generate(
 
 
         try:
-            # Call the main processing function for local generation
-            print(f"Generating changelog locally for {repo}...")
+            print(f"Attempting to generate changelog locally via process_repository for {repo}...")
             changelog_content = process_repository(
                 repo=repo,
                 token=token, # Token might be needed for private repo access
@@ -172,15 +171,21 @@ def generate(
             )
 
             if changelog_content:
-                try:
-                    with open(output_filename, "w") as f:
-                        f.write(changelog_content)
-                    print(f"Changelog successfully written locally to {output_filename}")
-                except IOError as e:
-                    print(f"Error writing to output file {output_filename}: {e}", file=sys.stderr)
-                    raise typer.Exit(code=1)
+                # Check if content is just whitespace
+                if not changelog_content.strip():
+                     print("Changelog content generated but is empty or whitespace. File not written.")
+                else:
+                    print(f"Changelog content generated (length: {len(changelog_content)}). Attempting to write to {output_filename}...")
+                    try:
+                        with open(output_filename, "w") as f:
+                            f.write(changelog_content)
+                        print(f"Changelog successfully written locally to {output_filename}")
+                    except IOError as e:
+                        print(f"Error writing to output file {output_filename}: {e}", file=sys.stderr)
+                        raise typer.Exit(code=1)
             else:
-                print("Could not generate changelog content.")
+                # This executes if process_repository returns None or ""
+                print("process_repository returned None or empty string. File not written.")
 
         except Exception as e:
             print(f"\nAn error occurred during local processing: {e}", file=sys.stderr)
