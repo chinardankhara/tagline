@@ -1,3 +1,4 @@
 typer
 google-generativeai
 pytest
+python-dotenv
