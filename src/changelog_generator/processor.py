@@ -76,19 +76,15 @@ def format_commit_data_for_llm(commits: List[Dict[str, Any]], files: List[Dict[s
 def process_repository(
     repo: str,
     token: Optional[str],
-    since_tag: Optional[str],
-    tag_range: Optional[Tuple[str, str]],
-    target_branch: Optional[str],
+    tag_range: Tuple[str, str],
 ) -> Tuple[Optional[str], Optional[str]]:
     """
-    Fetches repository data, generates a changelog, and suggests a filename using LLM.
+    Fetches repository data for a tag range, generates a changelog, and suggests a filename.
 
     Args:
         repo: Repository name ('owner/repo').
         token: GitHub PAT.
-        since_tag: Generate changelog since this tag.
-        tag_range: Tuple of (from_tag, to_tag).
-        target_branch: Specific branch to compare against.
+        tag_range: Tuple of (from_tag, to_tag). Required.
 
     Returns:
         A tuple containing (changelog_content, suggested_filename).
@@ -100,31 +96,18 @@ def process_repository(
     print(f"Processing repository: {repo}")
     client = GitHubClient(repo=repo, token=token)
 
-    base_ref = None
-    head_ref = None
-
     try:
-        if tag_range:
-            base_ref = tag_range[0]
-            head_ref = tag_range[1]
-            print(f"Comparing tags: {base_ref}...{head_ref}")
-        elif since_tag:
-            base_ref = since_tag
-            head_ref = target_branch or client.get_default_branch()
-            if not head_ref:
-                 print("Error: Could not determine the head reference (default branch or specified branch).")
-                 return None, None # Return None for both
-            print(f"Comparing since tag: {base_ref} up to {head_ref}")
-        else:
-            print("Error: No valid tag range specified.")
-            return None, None # Return None for both
+        # tag_range is now guaranteed by the CLI
+        base_ref = tag_range[0]
+        head_ref = tag_range[1]
+        print(f"Comparing tags: {base_ref}...{head_ref}")
 
         print(f"Fetching comparison data between {base_ref} and {head_ref}...")
         comparison_data = client.compare_commits(base=base_ref, head=head_ref)
 
         if comparison_data is None:
             print(f"Failed to get comparison data for {base_ref}...{head_ref}.")
-            return None, None # Return None for both
+            return None, None
 
         commits = comparison_data.get('commits', [])
         files = comparison_data.get('files', [])
@@ -136,9 +119,8 @@ def process_repository(
 
         # --- Call LLM Handler ---
         print("Generating changelog and suggesting filename with LLM...")
-        llm = LLMHandler()  # Assumes GEMINI_API_KEY is set in env
+        llm = LLMHandler()
 
-        # Call LLMHandler which now returns a tuple
         changelog_content, suggested_filename = llm.generate_changelog(
             commits=commits,
             files_changed=files,
@@ -147,7 +129,6 @@ def process_repository(
             repo=repo
         )
 
-        # Optionally print the content (or a snippet) here for debugging
         if changelog_content:
             print(f"\n--- Generated Changelog Content (length: {len(changelog_content)}) ---")
         else:
@@ -157,13 +138,12 @@ def process_repository(
         else:
             print("--- LLM did not suggest a filename ---")
 
-        # Return the tuple received from LLMHandler
         return changelog_content, suggested_filename
 
     except requests.exceptions.RequestException as e:
          print(f"GitHub API Error during processing: {e}")
-         raise # Re-raise to be caught by the CLI
+         raise
     except Exception as e:
          print(f"An unexpected error occurred in processor: {type(e).__name__} - {e}")
          traceback.print_exc()
-         raise # Re-raise to be caught by the CLI
+         raise

@@ -76,16 +76,22 @@ def generate(
     repo: str = typer.Argument(
         ..., help="Repository name ('owner/repo') for which to generate/deploy the changelog."
     ),
-    since_tag: Optional[str] = typer.Option(None, "--since-tag", help="Generate locally for commits since this tag (requires --local)."),
-    from_tag: Optional[str] = typer.Option(None, "--from-tag", help="Start tag for the changelog range (required for deploy)."),
-    to_tag: Optional[str] = typer.Option(None, "--to-tag", help="End tag for the changelog range (required for deploy)."),
-    output: Optional[str] = typer.Option(None, "-o", "--output", help="Local output file path (requires --local). Overrides default naming."),
-    branch: Optional[str] = typer.Option(None, "-b", "--branch", help="Specify a branch/commit for local comparison (requires --local)."),
+    from_tag: Optional[str] = typer.Option(
+        None, "-f", "--from-tag",
+        help="Start tag/ref for the changelog range (required for both modes)."
+    ),
+    to_tag: Optional[str] = typer.Option(
+        None, "-t", "--to-tag",
+        help="End tag/ref for the changelog range (required for both modes)."
+    ),
+    output: Optional[str] = typer.Option(
+        None, "-o", "--output",
+        help="Local output file path (only used with --local). Overrides AI suggestion."
+    ),
     token: Optional[str] = typer.Option(
-        lambda: os.environ.get("GITHUB_TOKEN"), # Read from GITHUB_TOKEN now
+        lambda: os.environ.get("GITHUB_TOKEN"),
         "--token",
-        # Adjusted help text: Token is primarily for deployment trigger, but also needed for local private repo access.
-        help="GitHub PAT (repo scope required for deploy). Reads from GITHUB_TOKEN env var.",
+        help="GitHub PAT (repo scope required for deploy, also used for local private/rate limit). Reads from GITHUB_TOKEN env var.",
         show_default="Reads from GITHUB_TOKEN env var",
     ),
     local: bool = typer.Option(
@@ -96,119 +102,81 @@ def generate(
     ),
 ):
     """
-    Generates and DEPLOYS a changelog by triggering a GitHub Action by default.
+    Generates and optionally DEPLOYS a changelog for a given tag range.
 
-    Requires --from-tag and --to-tag for deployment.
-    Use --local to generate the file locally in the './changelogs' directory instead.
+    Requires --from-tag (-f) and --to-tag (-t) for both deployment and local generation.
+    Use --local to generate the file locally in the './changelogs' directory instead of deploying.
     If --local is used and -o/--output is NOT provided, the AI will suggest a filename.
-    A GitHub Token (repo scope) is required for deployment.
+    A GitHub Token is needed for deployment and recommended for local generation.
     """
+
+    # --- Validate common required tags ---
+    if not (from_tag and to_tag):
+        print("Error: --from-tag (-f) and --to-tag (-t) are required.", file=sys.stderr)
+        raise typer.Exit(code=1)
 
     # --- Action: Trigger Deployment (Default) ---
     if not local:
-        if not (from_tag and to_tag):
-             print("Error: --from-tag and --to-tag are required to trigger deployment.", file=sys.stderr)
-             raise typer.Exit(code=1)
-        if since_tag or output or branch:
-             print("Warning: --since-tag, -o/--output, and -b/--branch are ignored when deploying.", file=sys.stderr)
+        if output:
+             print("Warning: -o/--output is ignored when deploying (not using --local).", file=sys.stderr)
 
         # Trigger deployment and exit
-        # Pass the token read from env/option
         trigger_deploy_workflow(target_repo=repo, from_tag=from_tag, to_tag=to_tag, token=token)
-        return # Exit CLI after triggering
+        return
 
     # --- Action: Local Generation (if --local is used) ---
     else:
-        # Validation for local generation
-        range_defined = since_tag or (from_tag and to_tag)
-        if not range_defined:
-            print("Error: For local generation (--local), specify a range using --since-tag or --from-tag/--to-tag.")
-            raise typer.Exit(code=1)
-        if from_tag and not to_tag:
-            print("Error: Using --from-tag requires --to-tag.")
-            raise typer.Exit(code=1)
-        if to_tag and not from_tag:
-            print("Error: Using --to-tag requires --from-tag.")
-            raise typer.Exit(code=1)
-        if since_tag and (from_tag or to_tag):
-             print("Error: Use only one of --since-tag or (--from-tag and --to-tag) for local generation.")
-             raise typer.Exit(code=1)
-
         if not token:
-             print("Warning: No GitHub token provided. Public repos might work, but rate limits apply.")
+             print("Warning: No GitHub token provided (--token or GITHUB_TOKEN env var). Public repos might work, but rate limits apply.")
 
-        tag_range_tuple = (from_tag, to_tag) if from_tag and to_tag else None
+        tag_range_tuple = (from_tag, to_tag)
 
         # --- Generate Content and Suggested Filename ---
         changelog_content = None
         suggested_filename = None
         try:
-            print(f"Attempting local generation for {repo} ({'since '+since_tag if since_tag else str(tag_range_tuple)}) using processor...")
+            print(f"Attempting local generation for {repo} ({from_tag}...{to_tag}) using processor...")
             # process_repository now returns a tuple
             changelog_content, suggested_filename = process_repository(
                 repo=repo,
                 token=token,
-                since_tag=since_tag,
                 tag_range=tag_range_tuple,
-                target_branch=branch,
             )
 
-            # Check if primary content generation failed
             if not changelog_content or not changelog_content.strip():
                  print("Changelog content was not generated or is empty. Exiting.")
                  raise typer.Exit(code=1)
 
         except Exception as e:
-            # Handle errors from process_repository (e.g., GitHub API, LLM errors)
             print(f"\nAn error occurred during processing: {e}", file=sys.stderr)
-            # Optionally print traceback if needed for debugging
-            # import traceback
-            # traceback.print_exc()
             raise typer.Exit(code=1)
 
         # --- Determine Output Filename --- 
-        # If user provided an output path, use it directly
         output_filename = output
         if output_filename:
              print(f"User specified output file: {output_filename}")
-             # Ensure directory exists if path contains folders
              output_dir = os.path.dirname(output_filename)
              if output_dir:
                  os.makedirs(output_dir, exist_ok=True)
-             # If user gave only a filename, put it in the default directory
              elif not os.path.isabs(output_filename):
                  os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
                  output_filename = os.path.join(LOCAL_OUTPUT_DIR, output_filename)
-
         else:
-            # User did NOT provide --output, try using AI suggestion or default
             if suggested_filename:
-                # Sanitize the AI's suggestion before using it
                 safe_suggested_name = sanitize_filename(suggested_filename)
-                # Ensure it still ends with .md after sanitizing
                 if not safe_suggested_name.lower().endswith('.md'):
                      safe_suggested_name += ".md"
                 output_filename = os.path.join(LOCAL_OUTPUT_DIR, safe_suggested_name)
                 print(f"Using AI suggested filename (sanitized): {output_filename}")
             else:
-                # Fallback to the original default naming scheme
                 print("AI did not suggest a filename. Using default naming scheme.")
                 sanitized_repo = sanitize_filename(repo)
-                if since_tag:
-                    sanitized_tag = sanitize_filename(since_tag)
-                    filename = f"{sanitized_repo}_since_{sanitized_tag}.md"
-                elif tag_range_tuple:
-                    sanitized_from = sanitize_filename(tag_range_tuple[0])
-                    sanitized_to = sanitize_filename(tag_range_tuple[1])
-                    filename = f"{sanitized_repo}_{sanitized_from}_to_{sanitized_to}.md"
-                else:
-                    # Should not happen due to earlier validation, but good to have a fallback
-                    print("Error: Could not determine range for default filename. Using generic name.", file=sys.stderr)
-                    filename = f"{sanitized_repo}_changelog_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.md"
-                
+                # Only tag_range_tuple is possible now
+                sanitized_from = sanitize_filename(tag_range_tuple[0])
+                sanitized_to = sanitize_filename(tag_range_tuple[1])
+                filename = f"{sanitized_repo}_{sanitized_from}_to_{sanitized_to}.md"
                 output_filename = os.path.join(LOCAL_OUTPUT_DIR, filename)
-            
-            # Ensure the default output directory exists
+
             os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
 
         # --- Write Output File ---
