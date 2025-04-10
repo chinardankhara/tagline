@@ -4,7 +4,7 @@ This project is an AI-powered tool designed to automatically generate changelogs
 
 This project was developed as part of the Greptile Software Engineer interview process.
 
-## Project Goal 
+## Project Goal
 
 The core challenge this tool addresses is the manual effort involved in:
 1.  Reviewing commit histories over days or weeks.
@@ -14,7 +14,12 @@ The goal is to provide:
 1.  A **developer-facing tool** (this CLI application) to quickly generate changelogs.
 2.  A simple **public-facing website** (Future Work) to display these changelogs.
 
-## Highlights / Features
+<details>
+<summary><strong>🔧 Technical Deep Dive</strong> (Click to Expand)</summary>
+
+---
+
+### Highlights / Features
 
 *   **AI-Powered Summarization:** Uses Google's Gemini models to analyze commit messages and generate human-readable changelog entries.
 *   **GitHub Integration:** Fetches commit data, tag information, and file changes directly from GitHub repositories using the GitHub API.
@@ -23,7 +28,7 @@ The goal is to provide:
 *   **Command-Line Interface:** Simple and intuitive CLI built with Typer for ease of use by developers.
 *   **Automatic Output File Naming:** Generates a sensible default output filename based on the repository and tag range, reducing command verbosity.
 
-## Tech Stack & Design Decisions
+### Tech Stack & Design Decisions
 
 *   **Language:** Python 3.10+
     *   *Why:* Excellent ecosystem for interacting with APIs, data processing, and AI libraries. Widely used and understood.
@@ -45,16 +50,24 @@ The goal is to provide:
 *   **Prompt Engineering:** Stored prompts in markdown files and iterated significantly based on output quality and examples like Stripe's changelog format. This allows non-code changes to influence the output style.
 *   **Output Handling:** Default to writing to a generated file, removing the need for an `-o` flag in the common case, simplifying the command for developers.
 
-## Getting Started
+---
+</details>
 
-### Prerequisites
+<details>
+<summary><strong>🚀 Setup & Usage Guide</strong> (Click to Expand)</summary>
+
+---
+
+### Getting Started
+
+#### Prerequisites
 
 *   Python 3.10 or higher
 *   Git
 *   GitHub Personal Access Token (PAT) with `repo` scope (or `public_repo` for public repositories only). A classic token is even better.
 *   Google AI Gemini API Key.
 
-### Installation
+#### Installation
 
 1.  **Clone the repository:**
     ```bash
@@ -73,7 +86,7 @@ The goal is to provide:
     pip install -r requirements.txt
     ```
 
-### Configuration
+#### Configuration
 
 1.  Create a `.env` file in the project root directory (`llm-changelog/`).
 2.  Add your API keys to the `.env` file:
@@ -85,7 +98,7 @@ The goal is to provide:
     ```
     *Alternatively, you can pass the GitHub token via the `--token` flag.*
 
-## 💻 Usage (CLI Tool)
+### 💻 Usage (CLI Tool)
 
 Run the tool from the project's root directory using `python3 -m src.changelog_generator.cli`.
 
@@ -118,6 +131,9 @@ Run the tool from the project's root directory using `python3 -m src.changelog_g
     python3 -m src.changelog_generator.cli --help
     python3 -m src.changelog_generator.cli generate --help
     ```
+
+---
+</details>
 
 ## 🌐 Public-Facing Website
 
