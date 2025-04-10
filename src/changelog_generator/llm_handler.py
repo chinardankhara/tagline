@@ -1,9 +1,10 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 import pathlib
 import datetime
+import re
 
 load_dotenv()
 
@@ -111,8 +112,14 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
         from_ref: str,
         to_ref: str,
         repo: str,
-    ) -> str:
-        """Generate a changelog using the configured model."""
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Generate a changelog using the configured model.
+
+        Returns:
+            A tuple containing (changelog_content, suggested_filename).
+            Both can be None if generation fails.
+        """
         # Format commits (optionally clean them first)
         cleaned_commits = []
         for commit in commits:
@@ -149,7 +156,22 @@ Remove conversational filler or unnecessary details, but *keep* any mentioned Pu
 
         try:
             # Use the helper method with the dedicated changelog model
-            return self._safe_generate_content(self.changelog_model, user_prompt)
+            full_response = self._safe_generate_content(self.changelog_model, user_prompt)
+
+            # --- Extract Suggested Filename --- 
+            changelog_content = full_response
+            suggested_filename = None
+            filename_match = re.search(r"\nSuggested Filename:\s*(.*\.md)\s*$", full_response, re.IGNORECASE)
+
+            if filename_match:
+                suggested_filename = filename_match.group(1).strip()
+                # Remove the filename line from the main content
+                changelog_content = full_response[:filename_match.start()].strip()
+                print(f"Extracted suggested filename: {suggested_filename}")
+            else:
+                 print("Warning: Could not find 'Suggested Filename:' line in LLM response.")
+
+            return changelog_content, suggested_filename
 
         except Exception as e:
             # Format a fallback message including the raw data
@@ -165,7 +187,8 @@ Raw commit data has been included below:
 
 {file_changes}
 """
-            return error_msg
+            # Return error message as content, None for filename
+            return error_msg, None
 
     def format_commit_message(self, message: str) -> str:
         """Clean and format a single commit message using the configured formatter model."""

@@ -4,6 +4,7 @@ import os
 import sys # For exiting
 import re # For sanitizing filename
 import requests  # Add requests library
+import datetime
 
 # Use relative import again
 from .processor import process_repository
@@ -99,6 +100,7 @@ def generate(
 
     Requires --from-tag and --to-tag for deployment.
     Use --local to generate the file locally in the './changelogs' directory instead.
+    If --local is used and -o/--output is NOT provided, the AI will suggest a filename.
     A GitHub Token (repo scope) is required for deployment.
     """
 
@@ -137,58 +139,86 @@ def generate(
 
         tag_range_tuple = (from_tag, to_tag) if from_tag and to_tag else None
 
-        # Determine default output filename if needed, placing it in LOCAL_OUTPUT_DIR
-        output_filename = output
-        if output_filename is None:
-            sanitized_repo = sanitize_filename(repo)
-            if since_tag:
-                sanitized_tag = sanitize_filename(since_tag)
-                filename = f"{sanitized_repo}_since_{sanitized_tag}.md"
-            elif tag_range_tuple:
-                sanitized_from = sanitize_filename(tag_range_tuple[0])
-                sanitized_to = sanitize_filename(tag_range_tuple[1])
-                filename = f"{sanitized_repo}_{sanitized_from}_to_{sanitized_to}.md"
-            else:
-                 print("Error: Could not determine tag range for default filename.", file=sys.stderr)
-                 raise typer.Exit(code=1)
-            # Ensure the local output directory exists
-            os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
-            output_filename = os.path.join(LOCAL_OUTPUT_DIR, filename)
-        elif not os.path.dirname(output_filename):
-            # If user provided just a filename, prepend the directory
-             os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
-             output_filename = os.path.join(LOCAL_OUTPUT_DIR, output_filename)
-
-
+        # --- Generate Content and Suggested Filename ---
+        changelog_content = None
+        suggested_filename = None
         try:
-            print(f"Attempting to generate changelog locally via process_repository for {repo}...")
-            changelog_content = process_repository(
+            print(f"Attempting local generation for {repo} ({'since '+since_tag if since_tag else str(tag_range_tuple)}) using processor...")
+            # process_repository now returns a tuple
+            changelog_content, suggested_filename = process_repository(
                 repo=repo,
-                token=token, # Token might be needed for private repo access
+                token=token,
                 since_tag=since_tag,
                 tag_range=tag_range_tuple,
                 target_branch=branch,
             )
 
-            if changelog_content:
-                # Check if content is just whitespace
-                if not changelog_content.strip():
-                     print("Changelog content generated but is empty or whitespace. File not written.")
-                else:
-                    print(f"Changelog content generated (length: {len(changelog_content)}). Attempting to write to {output_filename}...")
-                    try:
-                        with open(output_filename, "w") as f:
-                            f.write(changelog_content)
-                        print(f"Changelog successfully written locally to {output_filename}")
-                    except IOError as e:
-                        print(f"Error writing to output file {output_filename}: {e}", file=sys.stderr)
-                        raise typer.Exit(code=1)
-            else:
-                # This executes if process_repository returns None or ""
-                print("process_repository returned None or empty string. File not written.")
+            # Check if primary content generation failed
+            if not changelog_content or not changelog_content.strip():
+                 print("Changelog content was not generated or is empty. Exiting.")
+                 raise typer.Exit(code=1)
 
         except Exception as e:
-            print(f"\nAn error occurred during local processing: {e}", file=sys.stderr)
+            # Handle errors from process_repository (e.g., GitHub API, LLM errors)
+            print(f"\nAn error occurred during processing: {e}", file=sys.stderr)
+            # Optionally print traceback if needed for debugging
+            # import traceback
+            # traceback.print_exc()
+            raise typer.Exit(code=1)
+
+        # --- Determine Output Filename --- 
+        # If user provided an output path, use it directly
+        output_filename = output
+        if output_filename:
+             print(f"User specified output file: {output_filename}")
+             # Ensure directory exists if path contains folders
+             output_dir = os.path.dirname(output_filename)
+             if output_dir:
+                 os.makedirs(output_dir, exist_ok=True)
+             # If user gave only a filename, put it in the default directory
+             elif not os.path.isabs(output_filename):
+                 os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+                 output_filename = os.path.join(LOCAL_OUTPUT_DIR, output_filename)
+
+        else:
+            # User did NOT provide --output, try using AI suggestion or default
+            if suggested_filename:
+                # Sanitize the AI's suggestion before using it
+                safe_suggested_name = sanitize_filename(suggested_filename)
+                # Ensure it still ends with .md after sanitizing
+                if not safe_suggested_name.lower().endswith('.md'):
+                     safe_suggested_name += ".md"
+                output_filename = os.path.join(LOCAL_OUTPUT_DIR, safe_suggested_name)
+                print(f"Using AI suggested filename (sanitized): {output_filename}")
+            else:
+                # Fallback to the original default naming scheme
+                print("AI did not suggest a filename. Using default naming scheme.")
+                sanitized_repo = sanitize_filename(repo)
+                if since_tag:
+                    sanitized_tag = sanitize_filename(since_tag)
+                    filename = f"{sanitized_repo}_since_{sanitized_tag}.md"
+                elif tag_range_tuple:
+                    sanitized_from = sanitize_filename(tag_range_tuple[0])
+                    sanitized_to = sanitize_filename(tag_range_tuple[1])
+                    filename = f"{sanitized_repo}_{sanitized_from}_to_{sanitized_to}.md"
+                else:
+                    # Should not happen due to earlier validation, but good to have a fallback
+                    print("Error: Could not determine range for default filename. Using generic name.", file=sys.stderr)
+                    filename = f"{sanitized_repo}_changelog_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.md"
+                
+                output_filename = os.path.join(LOCAL_OUTPUT_DIR, filename)
+            
+            # Ensure the default output directory exists
+            os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+
+        # --- Write Output File ---
+        print(f"Attempting to write changelog to {output_filename}...")
+        try:
+            with open(output_filename, "w", encoding='utf-8') as f:
+                f.write(changelog_content)
+            print(f"Changelog successfully written locally to {output_filename}")
+        except IOError as e:
+            print(f"Error writing to output file {output_filename}: {e}", file=sys.stderr)
             raise typer.Exit(code=1)
 
 

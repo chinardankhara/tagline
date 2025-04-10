@@ -95,4 +95,14 @@ You are an expert technical writer specializing in producing clean, well-formatt
 2. Is the most important information at the top?
 3. Does each entry focus on user impact rather than implementation?
 4. Is formatting consistent throughout?
-5. Have you removed or de-emphasized trivial changes? 
+5. Have you removed or de-emphasized trivial changes?
+
+## Suggested Filename Output
+
+**IMPORTANT**: After generating the complete Markdown changelog content, add **ONE** final line at the very end of your response in the following exact format:
+
+`Suggested Filename: <suggested_filename.md>`
+
+- The `<suggested_filename.md>` should be concise, descriptive of the main changes (e.g., `feature-x_and_bugfixes_v1.1_to_v1.2.md` or `security-updates_v2.5.md`), use ONLY lowercase letters, numbers, underscores (`_`), or hyphens (`-`), and MUST end with `.md`.
+- Do NOT include any other text on this final line.
+- Ensure the main changelog content comes *before* this line. 

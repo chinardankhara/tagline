@@ -1,11 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "llm-changelog"
 version = "0.1.0"
-description = "AI-powered changelog generator for GitHub repositories."
-authors = ["Your Name <you@example.com>"]
+authors = [
+    { name = "Chinar Dankhara", email = "chinardankhara@gmail.com" }
+]
+description = "An AI-powered changelog generator"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "typer[all]>=0.9.0",
+    "google-generativeai",
+    "python-dotenv",
+    "requests",
+    "pytest",
+    "pytest-mock"
+]
 
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+[project.scripts]
+# This entry point points to the Typer app in src/changelog_generator/cli.py
+tagline = "changelog_generator.cli:app"
+
+# Map the src directory to the package root
+[tool.hatch.build.sources]
+"src" = ""
+
+[tool.hatch.build.targets.wheel]
+# Since we use the 'sources' mapping above, Hatch knows the package is in 'src'.
+# We don't need to explicitly list 'packages' here.
+# However, we need to ensure our non-code files (templates) are included.
+packages = ["src/changelog_generator"] # Explicitly point to the package within src
+
+
+[tool.hatch.build]
+# Include files relative to the project root
+include = [
+    "/src", # Include the source directory itself
+    "/README.md",
+]
+exclude = [
+    "/tests",
+    "**/__pycache__",
+    ".*", # Exclude dotfiles/dirs often added by tools
+]
+
+# Tell hatch about package data relative to the package directory inside 'src'
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/README.md", "/pyproject.toml"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"src/changelog_generator/templates" = "changelog_generator/templates"
+
+# Optional: links for PyPI
+# [project.urls]
+# Homepage = "..."
+# Repository = "..."
