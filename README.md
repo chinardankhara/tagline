@@ -172,3 +172,5 @@ Once installed, you can run the tool directly using the `tagline` command.
 </details>
 
 **Note**: It takes a few minutes after running CLI to update the website due to LLM and yaml pipelines needing time. 
+
+**AI Tools**: Cursor IDE. Gemini 2.5 Pro is my driver of choice. 
