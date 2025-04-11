@@ -4,7 +4,9 @@ import os
 import sys # For exiting
 import re # For sanitizing filename
 import requests  # Add requests library
-import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Use relative import again
 from .processor import process_repository
@@ -15,7 +17,7 @@ app = typer.Typer(
 
 # --- Constants ---
 # Replace with your username and the repo where the Action workflow lives
-ACTION_REPO_OWNER = "chinardankhara"
+ACTION_REPO_OWNER = os.getenv("ACTION_REPO_OWNER")
 ACTION_REPO_NAME = "tagline"
 WORKFLOW_ID = "deploy_changelog.yml" # The filename of your workflow
 LOCAL_OUTPUT_DIR = "changelogs" # Directory to save local files
